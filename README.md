@@ -11,7 +11,7 @@ A sticky notes plugin for the [Omarchy](https://omarchy.org/) shell. A bar icon
 opens a panel of yellow sticky notes laid out as a bento board. Notes live only
 in the panel, never on the desktop.
 
-![Sticky notes panel open from the Omarchy bar](screenshots/panel.png)
+![Sticky notes panel open from the Omarchy bar](preview.png)
 
 ## Features
 
@@ -26,7 +26,7 @@ in the panel, never on the desktop.
     Empty notes delete on the first click.
 - **View all**: the panel shows 6 notes; *View all* widens it to every note.
 - **Keys in the panel**: `Ctrl+N` new note, `Esc` close.
-- **Saved automatically** to `~/.local/share/abu-stickynotes/notes.json`, and kept
+- **Saved automatically** to `~/.local/share/omarchy-sticky-notes/notes.json`, and kept
   in sync across monitors.
 - Panel colors follow your Omarchy theme.
 
@@ -34,6 +34,11 @@ in the panel, never on the desktop.
 
 - Omarchy with the Quickshell-based shell (`omarchy plugin` commands available).
 - A Nerd Font for the icons (Omarchy's default JetBrainsMono Nerd Font works).
+
+**External dependencies: none.** The plugin is a single QML file that uses only
+what the Omarchy shell already provides. It runs no network requests and no
+privileged commands; the only process it starts is `mkdir -p` for its notes folder.
+It never edits your Omarchy, Hyprland or bar configuration.
 
 ## Install
 
@@ -44,7 +49,7 @@ omarchy plugin add https://github.com/RuffBudda/omarchy-sticky-notes.git --enabl
 The icon goes on the left of the bar. To move it:
 
 ```bash
-omarchy bar move abu.stickynotes --section right
+omarchy bar move io.github.ruffbudda.sticky-notes --section right
 ```
 
 If the icon doesn't appear, restart the shell:
@@ -78,12 +83,12 @@ omarchy-shell stickynotes add      # add a note and open the panel
 ## Update and uninstall
 
 ```bash
-omarchy plugin update abu.stickynotes
-omarchy plugin remove abu.stickynotes
+omarchy plugin update io.github.ruffbudda.sticky-notes
+omarchy plugin remove io.github.ruffbudda.sticky-notes
 ```
 
 Removing the plugin keeps your notes. Delete
-`~/.local/share/abu-stickynotes/` to remove them as well.
+`~/.local/share/omarchy-sticky-notes/` to remove them as well.
 
 ## License
 

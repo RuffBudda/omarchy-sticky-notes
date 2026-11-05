@@ -4,7 +4,7 @@
 // IPC: omarchy-shell stickynotes toggle | open | all | add
 //
 // Each bar (one per monitor) has its own copy of this widget. They share
-// notes through ~/.local/share/abu-stickynotes/notes.json and reload when
+// notes through ~/.local/share/omarchy-sticky-notes/notes.json and reload when
 // another copy writes it.
 import QtQuick
 import Quickshell
@@ -16,7 +16,7 @@ import qs.Commons as Commons
 
 BarWidget {
   id: root
-  moduleName: "abu.stickynotes"
+  moduleName: "io.github.ruffbudda.sticky-notes"
 
   property bool popupOpen: false
   property bool showAll: false          // "View all" expanded panel
@@ -111,7 +111,7 @@ BarWidget {
       { key: "charcoal", name: "Charcoal", color: "#3b3b3b" }
     ]
     readonly property var notes: notesModel
-    readonly property string dataDir: Quickshell.env("HOME") + "/.local/share/abu-stickynotes"
+    readonly property string dataDir: Quickshell.env("HOME") + "/.local/share/omarchy-sticky-notes"
     property bool loaded: false
     property string lastAddedId: ""
     property string lastColor: "yellow"
@@ -217,7 +217,7 @@ BarWidget {
             size: ["s", "w", "t", "l"].indexOf(list[i].size) >= 0 ? list[i].size : ""
           })
       } catch (e) {
-        console.warn("abu.stickynotes: could not read notes.json: " + e)
+        console.warn("sticky-notes: could not read notes.json: " + e)
       }
       loaded = true
       rev++
