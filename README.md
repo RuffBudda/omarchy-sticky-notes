@@ -1,8 +1,17 @@
 # Omarchy Sticky Notes
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-e53935.svg)](LICENSE)
+[![Omarchy plugin](https://img.shields.io/badge/Omarchy-shell%20plugin-111111.svg)](https://omarchy.org/)
+[![Qt Quick](https://img.shields.io/badge/Qt%20Quick-QML-41CD52.svg?logo=qt&logoColor=white)](https://doc.qt.io/qt-6/qtquick-index.html)
+[![Quickshell](https://img.shields.io/badge/Quickshell-Wayland-1f6feb.svg)](https://quickshell.org/)
+[![Hyprland](https://img.shields.io/badge/Hyprland-supported-58E1FF.svg?logo=hyprland&logoColor=black)](https://hypr.land/)
+[![Last commit](https://img.shields.io/github/last-commit/RuffBudda/omarchy-sticky-notes.svg)](https://github.com/RuffBudda/omarchy-sticky-notes/commits/main)
+
 A sticky notes plugin for the [Omarchy](https://omarchy.org/) shell. A bar icon
 opens a panel of yellow sticky notes laid out as a bento board. Notes live only
 in the panel, never on the desktop.
+
+![Sticky notes panel open from the Omarchy bar](screenshots/panel.png)
 
 ## Features
 
