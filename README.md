@@ -27,7 +27,8 @@ in the panel, never on the desktop.
 - **View all**: the panel shows 6 notes; *View all* widens it to every note.
 - **Keys in the panel**: `Ctrl+N` new note, `Esc` close.
 - **Saved automatically** to `~/.local/share/omarchy-sticky-notes/notes.json`, and kept
-  in sync across monitors.
+  in sync across monitors. Only your account can read them: the folder is `0700` and
+  the file `0600`, whatever your umask (older installs are tightened on first start).
 - Panel colors follow your Omarchy theme.
 
 ## Requirements

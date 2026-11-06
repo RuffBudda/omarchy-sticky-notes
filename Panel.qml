@@ -227,9 +227,19 @@ BarWidget {
   Timer { id: saveTimer; interval: 400; onTriggered: store.save() }
   Component.onDestruction: if (saveTimer.running) store.save()
 
+  // Notes are private: the folder is owner-only (0700) and notes.json is 0600,
+  // whatever the umask. Folders and files left by older versions are tightened too.
+  // The file is seeded empty with 0600 so the first save keeps that mode (atomic
+  // writes keep the mode of the file they replace). The path goes in as $1, never
+  // spliced into the script.
   Process {
     running: true
-    command: ["mkdir", "-p", store.dataDir]
+    command: ["sh", "-c",
+      'umask 077; d="$1"; f="$d/notes.json"; ' +
+      'mkdir -p -- "$d" && chmod 700 -- "$d" || exit 1; ' +
+      'if [ -e "$f" ]; then chmod 600 -- "$f"; ' +
+      'else printf \'{ "version": 2, "notes": [] }\\n\' > "$f"; fi',
+      "sh", store.dataDir]
     onExited: dataFile.reload()
   }
 
