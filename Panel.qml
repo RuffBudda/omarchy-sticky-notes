@@ -22,11 +22,27 @@ BarWidget {
   property bool showAll: false          // "View all" expanded panel
   readonly property int compactLimit: 6
   readonly property int boardCols: showAll ? 6 : 4
-  readonly property var board: computeBoard(store.rev, boardCols, showAll)
+  readonly property var board: computeBoard(store.rev, fitRev, boardCols, showAll)
+
+  // Each card measures its text and reports the span it needs, by note id:
+  // { w: columns, h: rows }. A span depends only on the text and the column
+  // width, never on where the board puts the card, so there is no layout loop.
+  property var fit: ({})
+  property int fitRev: 0
+  function setFit(id, w, h) {
+    var f = fit[id]
+    if (f && f.w === w && f.h === h) return
+    fit[id] = { w: w, h: h }
+    // One re-pack per event-loop pass, not one per card: when every card
+    // re-measures at once (View all, a reload) that would be N full re-packs.
+    Qt.callLater(bumpFit)
+  }
+  function bumpFit() { fitRev++ }
 
   // Bento packing: place each note (in order) at the first free spot that
-  // fits its span. Returns a cell rect per note (null = not shown) + row count.
-  function computeBoard(_rev, cols, all) {
+  // fits its measured span. Returns a cell rect per note (null = not shown)
+  // + row count.
+  function computeBoard(_rev, _fit, cols, all) {
     var occ = [], rects = [], rows = 0
     function free(r, c, w, h) {
       for (var y = r; y < r + h; y++)
@@ -35,7 +51,8 @@ BarWidget {
     }
     for (var i = 0; i < notesModel.count; i++) {
       if (!all && i >= compactLimit) { rects.push(null); continue }
-      var sp = store.spanOf(store.sizeAt(i)), w = Math.min(sp[0], cols), h = sp[1], done = false
+      var f = fit[notesModel.get(i).noteId]
+      var w = Math.min(f ? f.w : store.colsOf(store.sizeAt(i)), cols), h = f ? f.h : 1, done = false
       for (var r = 0; !done; r++) {
         for (var c = 0; c <= cols - w; c++) {
           if (!free(r, c, w, h)) continue
@@ -119,11 +136,15 @@ BarWidget {
     property int rev: 0          // bumps on every change; drives the bento layout
 
     readonly property string paper: "#fff176"   // every note is classic yellow
-    readonly property var sizeCycle: ["s", "w", "t", "l"]   // small, wide, tall, large
-    function spanOf(sz) { return sz === "l" ? [2, 2] : sz === "w" ? [2, 1] : sz === "t" ? [1, 2] : [1, 1] }
+    // Resize picks a note's starting width: narrow (1 column) or wide (2).
+    // Height always fits the text, and a long note widens further on its own.
+    // Older "t"/"l" sizes still load, as narrow and wide.
+    readonly property var sizeCycle: ["s", "w"]
+    function colsOf(sz) { return sz === "w" || sz === "l" ? 2 : 1 }
     // A note's size: the one picked with the resize button, else from its text.
     function sizeAt(i) {
       var n = notesModel.get(i)
+      if (!n) return "s"   // delegate of a note that was just removed
       if (n.size) return n.size
       var t = n.text || "", lines = t.split("\n").length
       if (t.length > 140 || lines >= 9) return "l"
@@ -134,8 +155,7 @@ BarWidget {
     function cycleSize(id) {
       var i = indexOf(id)
       if (i < 0) return
-      var cur = sizeCycle.indexOf(sizeAt(i))
-      notesModel.setProperty(i, "size", sizeCycle[(cur + 1) % sizeCycle.length])
+      notesModel.setProperty(i, "size", colsOf(sizeAt(i)) === 2 ? "s" : "w")
       rev++
       save()
     }
@@ -152,7 +172,7 @@ BarWidget {
     function addNote(colorKey) {   // newest first
       var id = String(Date.now()) + Math.floor(Math.random() * 1000)
       lastAddedId = id   // set first: the new card checks it as it is created, then takes the cursor
-      notesModel.insert(pinnedCount(), { noteId: id, colorKey: "yellow", text: "", updated: Date.now(), pinned: false, size: "l" })   // new notes start large
+      notesModel.insert(pinnedCount(), { noteId: id, colorKey: "yellow", text: "", updated: Date.now(), pinned: false, size: "w" })   // new notes start wide
       rev++
       save()
       return id
@@ -203,22 +223,32 @@ BarWidget {
     }
     function load(raw) {
       if (raw === lastWritten) { loaded = true; return }   // our own write coming back
-      lastWritten = raw
-      notesModel.clear()
+      // Check the whole file before touching the notes. A file caught half
+      // written (another program saving it in place) or broken must not clear
+      // them, or the next save would write that loss to disk. Keep the notes,
+      // and don't start saving over a file we could not read.
+      var data, list
       try {
-        var data = JSON.parse(raw)
-        if (data.lastColor) lastColor = String(data.lastColor)
-        var list = data.notes || []
-        for (var i = 0; i < list.length; i++)
-          notesModel.append({
-            noteId: String(list[i].id), colorKey: String(list[i].color || "yellow"),
-            text: String(list[i].text || ""), updated: Number(list[i].updated) || 0,
-            pinned: list[i].pinned === true,
-            size: ["s", "w", "t", "l"].indexOf(list[i].size) >= 0 ? list[i].size : ""
-          })
+        data = JSON.parse(raw)
+        if (!data || typeof data !== "object" || Array.isArray(data)) throw "not a notes file"
+        list = data.notes === undefined ? [] : data.notes
+        if (!Array.isArray(list)) throw "notes is not a list"
+        for (var j = 0; j < list.length; j++)
+          if (!list[j] || typeof list[j] !== "object") throw "note " + j + " is not an object"
       } catch (e) {
-        console.warn("sticky-notes: could not read notes.json: " + e)
+        console.warn("sticky-notes: could not read notes.json, keeping the notes in memory: " + e)
+        return
       }
+      lastWritten = raw
+      if (data.lastColor) lastColor = String(data.lastColor)
+      notesModel.clear()
+      for (var i = 0; i < list.length; i++)
+        notesModel.append({
+          noteId: String(list[i].id), colorKey: String(list[i].color || "yellow"),
+          text: String(list[i].text || ""), updated: Number(list[i].updated) || 0,
+          pinned: list[i].pinned === true,
+          size: ["s", "w", "t", "l"].indexOf(list[i].size) >= 0 ? list[i].size : ""
+        })
       loaded = true
       rev++
     }
@@ -227,9 +257,19 @@ BarWidget {
   Timer { id: saveTimer; interval: 400; onTriggered: store.save() }
   Component.onDestruction: if (saveTimer.running) store.save()
 
+  // Notes are private: the folder is owner-only (0700) and notes.json is 0600,
+  // whatever the umask. Folders and files left by older versions are tightened too.
+  // The file is seeded empty with 0600 so the first save keeps that mode (atomic
+  // writes keep the mode of the file they replace). The path goes in as $1, never
+  // spliced into the script.
   Process {
     running: true
-    command: ["mkdir", "-p", store.dataDir]
+    command: ["sh", "-c",
+      'umask 077; d="$1"; f="$d/notes.json"; ' +
+      'mkdir -p -- "$d" && chmod 700 -- "$d" || exit 1; ' +
+      'if [ -e "$f" ]; then chmod 600 -- "$f"; ' +
+      'else printf \'{ "version": 2, "notes": [] }\\n\' > "$f"; fi',
+      "sh", store.dataDir]
     onExited: dataFile.reload()
   }
 
@@ -434,12 +474,22 @@ BarWidget {
           boundsBehavior: Flickable.StopAtBounds
           interactive: contentHeight > height
 
+          // Keep the caret in view when a tall board scrolls.
+          function reveal(item, r) {
+            var y = item.mapToItem(grid, r.x, r.y).y
+            if (y < contentY) contentY = y
+            else if (y + r.height > contentY + height) contentY = y + r.height - height
+          }
+
           Item {
             id: grid
             width: flick.width
             readonly property real gap: Style.space(12)
             readonly property real cell: (width - gap * (root.boardCols - 1)) / root.boardCols
-            readonly property real rowH: Math.round(cell * 0.82)
+            // Fine rows, so a card is at most one small step taller than its text.
+            readonly property real rowH: Style.space(8)
+            // Tallest a card gets before it widens instead (an old "tall" note).
+            readonly property real maxCardH: 2 * Math.round(cell * 0.82) + gap
             implicitHeight: root.board.rows > 0 ? root.board.rows * rowH + (root.board.rows - 1) * gap : 0
             height: implicitHeight
 
@@ -497,10 +547,43 @@ BarWidget {
     readonly property bool hot: cardHover.hovered || body.activeFocus
     readonly property int fold: Style.space(18)
 
+    // Width: start at the picked width and widen (up to 4 columns) while the
+    // text would make the card taller than maxCardH. Measured with hidden copies
+    // of the text at each width, so it never depends on the card's own size.
+    readonly property int prefCols: { store.rev; return Math.min(store.colsOf(store.sizeAt(index)), root.boardCols) }
+    readonly property int maxCols: Math.max(prefCols, Math.min(4, root.boardCols))
+    function bodyWFor(c) { return c * grid.cell + (c - 1) * grid.gap - Style.space(28) }
+    readonly property var probeH: [probe1.contentHeight, probe2.contentHeight, probe3.contentHeight, probe4.contentHeight]
+    readonly property int cols: {
+      // Narrowest width that fits; else the shortest one (extra width that
+      // doesn't shorten the note, e.g. many short lines, is not taken).
+      var best = prefCols
+      for (var c = prefCols; c <= maxCols; c++) {
+        if (bodyTop + probeH[c - 1] + footH <= grid.maxCardH) return c
+        if (probeH[c - 1] < probeH[best - 1] - 0.5) best = c
+      }
+      return best
+    }
+    // Text area: fixed to the final column width (not the animated card width),
+    // so the measured height settles at once. Card height follows the text.
+    readonly property real bodyW: bodyWFor(cols)
+    readonly property real bodyTop: Style.space(34)
+    readonly property real footH: Style.space(4) + Math.max(when.height, Style.space(14)) + Style.space(9)
+    readonly property real needH: bodyTop + body.contentHeight + footH
+    readonly property int fitRows: Math.max(1, Math.ceil((needH + grid.gap) / (grid.rowH + grid.gap) - 0.001))
+    onColsChanged: root.setFit(noteId, cols, fitRows)
+    onFitRowsChanged: root.setFit(noteId, cols, fitRows)
+
+    Text { id: probe1; visible: false; width: card.bodyWFor(1); text: body.text; font: body.font; wrapMode: Text.Wrap; textFormat: Text.PlainText }
+    Text { id: probe2; visible: false; width: card.bodyWFor(2); text: body.text; font: body.font; wrapMode: Text.Wrap; textFormat: Text.PlainText }
+    Text { id: probe3; visible: false; width: card.bodyWFor(3); text: body.text; font: body.font; wrapMode: Text.Wrap; textFormat: Text.PlainText }
+    Text { id: probe4; visible: false; width: card.bodyWFor(4); text: body.text; font: body.font; wrapMode: Text.Wrap; textFormat: Text.PlainText }
+
     HoverHandler { id: cardHover }
 
     Component.onCompleted: {
       body.text = card.text
+      root.setFit(noteId, cols, fitRows)
       Qt.callLater(function() { card.settled = true })
       if (store.lastAddedId === noteId) {
         store.lastAddedId = ""
@@ -564,7 +647,7 @@ BarWidget {
         onClicked: store.togglePin(card.noteId)
       }
       CardButton {
-        glyph: "\uf065"   // resize: small → wide → tall → large
+        glyph: "\uf065"   // resize: narrow ↔ wide
         ink: card.ink
         onClicked: store.cycleSize(card.noteId)
       }
@@ -580,45 +663,30 @@ BarWidget {
     Timer { id: confirmTimer; interval: 3000; onTriggered: card.confirmDelete = false }
 
 
-    // Text
-    Flickable {
-      id: bodyFlick
-      anchors {
-        top: parent.top; left: parent.left; right: parent.right; bottom: when.top
-        topMargin: Style.space(34); leftMargin: Style.space(14); rightMargin: Style.space(14); bottomMargin: Style.space(4)
-      }
-      contentWidth: width
-      contentHeight: body.contentHeight
-      clip: true
-      boundsBehavior: Flickable.StopAtBounds
+    // Text (the card grows to fit it, so there is no inner scrolling)
+    TextEdit {
+      id: body
+      x: Style.space(14)
+      y: card.bodyTop
+      width: card.bodyW
+      height: Math.max(contentHeight, card.height - card.bodyTop - card.footH)
+      wrapMode: TextEdit.Wrap
+      textFormat: TextEdit.PlainText
+      selectByMouse: true
+      color: card.ink
+      selectionColor: card.dark ? "#777777" : Qt.darker(card.paper, 1.3)
+      selectedTextColor: card.ink
+      font.family: root.noteFont
+      font.pixelSize: Style.space(14)
+      onTextChanged: if (text !== card.text) store.update(card.noteId, { text: text })
+      onCursorRectangleChanged: if (activeFocus) flick.reveal(body, cursorRectangle)
+      Keys.onEscapePressed: root.close()
 
-      function ensureVisible(r) {
-        if (contentY >= r.y) contentY = r.y
-        else if (contentY + height <= r.y + r.height) contentY = r.y + r.height - height
-      }
-
-      TextEdit {
-        id: body
-        width: bodyFlick.width
-        height: Math.max(bodyFlick.height, contentHeight)
-        wrapMode: TextEdit.Wrap
-        textFormat: TextEdit.PlainText
-        selectByMouse: true
-        color: card.ink
-        selectionColor: card.dark ? "#777777" : Qt.darker(card.paper, 1.3)
-        selectedTextColor: card.ink
-        font.family: root.noteFont
-        font.pixelSize: Style.space(14)
-        onTextChanged: if (text !== card.text) store.update(card.noteId, { text: text })
-        onCursorRectangleChanged: bodyFlick.ensureVisible(cursorRectangle)
-        Keys.onEscapePressed: root.close()
-
-        Text {
-          visible: body.text === "" && !body.activeFocus
-          text: "Write something…"
-          color: card.inkSoft
-          font: body.font
-        }
+      Text {
+        visible: body.text === "" && !body.activeFocus
+        text: "Write something…"
+        color: card.inkSoft
+        font: body.font
       }
     }
 

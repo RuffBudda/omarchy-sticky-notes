@@ -16,18 +16,24 @@ in the panel, never on the desktop.
 ## Features
 
 - **Bar icon** opens and closes the panel. Middle-click it for a quick new note.
-- **Bento board**: notes come in four sizes (small, wide, tall, large) and pack
-  together. New notes start large.
+- **Bento board**: notes pack together and size themselves to their text. A note
+  is only as tall as its text, grows as you type and shrinks as you delete, so it
+  never scrolls inside itself. A long note widens (up to four columns, the full
+  board outside *View all*) before it gets very tall. The board scrolls only if
+  all your notes outgrow the panel.
 - **Type right away**: a new note gets the cursor as soon as it is created.
 - **Hover a note** for three buttons:
   - **Pin**: pinned notes stay at the top.
-  - **Resize**: cycles small → wide → tall → large.
+  - **Resize**: switches the note between narrow and wide. Height always follows
+    the text.
   - **Delete**: the trash icon turns red; click again within 3 seconds to delete.
     Empty notes delete on the first click.
 - **View all**: the panel shows 6 notes; *View all* widens it to every note.
 - **Keys in the panel**: `Ctrl+N` new note, `Esc` close.
 - **Saved automatically** to `~/.local/share/omarchy-sticky-notes/notes.json`, and kept
-  in sync across monitors.
+  in sync across monitors. Only your account can read them: the folder is `0700` and
+  the file `0600`, whatever your umask (files left readable by older versions are
+  tightened when the plugin loads).
 - Panel colors follow your Omarchy theme.
 
 ## Requirements
@@ -37,7 +43,10 @@ in the panel, never on the desktop.
 
 **External dependencies: none.** The plugin is a single QML file that uses only
 what the Omarchy shell already provides. It runs no network requests and no
-privileged commands; the only process it starts is `mkdir -p` for its notes folder.
+privileged commands. The only process it starts is a short `sh` command, run each
+time the widget loads (once per bar), that sets its notes folder to `0700` and
+`notes.json` to `0600`. If they are missing it creates them, with an empty note list
+(and any missing parent folders, also owner-only). It never changes your notes.
 It never edits your Omarchy, Hyprland or bar configuration.
 
 ## Install
