@@ -16,16 +16,15 @@ in the panel, never on the desktop.
 ## Features
 
 - **Bar icon** opens and closes the panel. Middle-click it for a quick new note.
-- **Bento board**: notes come in four sizes (small, wide, tall, large) and pack
-  together. New notes start large.
-- **Notes grow to fit their text**: a note gets taller as you type (and shrinks back
-  as you delete), so a note never scrolls inside itself. The chosen size is the
-  minimum; the board scrolls only if it outgrows the panel.
+- **Bento board**: notes pack together and size themselves to their text. A note
+  is only as tall as its text, grows as you type and shrinks as you delete, so it
+  never scrolls inside itself. A long note widens (up to the full board) before it
+  gets very tall. The board scrolls only if all your notes outgrow the panel.
 - **Type right away**: a new note gets the cursor as soon as it is created.
 - **Hover a note** for three buttons:
   - **Pin**: pinned notes stay at the top.
-  - **Resize**: cycles small → wide → tall → large (the minimum size; a long note
-    stays tall enough for its text, so make it wider to shorten it).
+  - **Resize**: switches the note between narrow and wide. Height always follows
+    the text.
   - **Delete**: the trash icon turns red; click again within 3 seconds to delete.
     Empty notes delete on the first click.
 - **View all**: the panel shows 6 notes; *View all* widens it to every note.

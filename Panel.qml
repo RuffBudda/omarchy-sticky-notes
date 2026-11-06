@@ -24,19 +24,21 @@ BarWidget {
   readonly property int boardCols: showAll ? 6 : 4
   readonly property var board: computeBoard(store.rev, fitRev, boardCols, showAll)
 
-  // Rows each note needs to show all its text, measured by its card (by note id).
-  // Rows only depend on a note's column width, never on the packing: no loop.
+  // Each card measures its text and reports the span it needs, by note id:
+  // { w: columns, h: rows }. A span depends only on the text and the column
+  // width, never on where the board puts the card, so there is no layout loop.
   property var fit: ({})
   property int fitRev: 0
-  function setFit(id, rows) {
-    if (fit[id] === rows) return
-    fit[id] = rows
+  function setFit(id, w, h) {
+    var f = fit[id]
+    if (f && f.w === w && f.h === h) return
+    fit[id] = { w: w, h: h }
     fitRev++
   }
 
   // Bento packing: place each note (in order) at the first free spot that
-  // fits its span (picked size is the minimum; rows grow to fit the text).
-  // Returns a cell rect per note (null = not shown) + row count.
+  // fits its measured span. Returns a cell rect per note (null = not shown)
+  // + row count.
   function computeBoard(_rev, _fit, cols, all) {
     var occ = [], rects = [], rows = 0
     function free(r, c, w, h) {
@@ -46,7 +48,8 @@ BarWidget {
     }
     for (var i = 0; i < notesModel.count; i++) {
       if (!all && i >= compactLimit) { rects.push(null); continue }
-      var sp = store.spanOf(store.sizeAt(i)), w = Math.min(sp[0], cols), h = Math.max(sp[1], fit[notesModel.get(i).noteId] || 1), done = false
+      var f = fit[notesModel.get(i).noteId]
+      var w = Math.min(f ? f.w : store.colsOf(store.sizeAt(i)), cols), h = f ? f.h : 1, done = false
       for (var r = 0; !done; r++) {
         for (var c = 0; c <= cols - w; c++) {
           if (!free(r, c, w, h)) continue
@@ -130,8 +133,11 @@ BarWidget {
     property int rev: 0          // bumps on every change; drives the bento layout
 
     readonly property string paper: "#fff176"   // every note is classic yellow
-    readonly property var sizeCycle: ["s", "w", "t", "l"]   // small, wide, tall, large
-    function spanOf(sz) { return sz === "l" ? [2, 2] : sz === "w" ? [2, 1] : sz === "t" ? [1, 2] : [1, 1] }
+    // Resize picks a note's starting width: narrow (1 column) or wide (2).
+    // Height always fits the text, and a long note widens further on its own.
+    // Older "t"/"l" sizes still load, as narrow and wide.
+    readonly property var sizeCycle: ["s", "w"]
+    function colsOf(sz) { return sz === "w" || sz === "l" ? 2 : 1 }
     // A note's size: the one picked with the resize button, else from its text.
     function sizeAt(i) {
       var n = notesModel.get(i)
@@ -146,8 +152,7 @@ BarWidget {
     function cycleSize(id) {
       var i = indexOf(id)
       if (i < 0) return
-      var cur = sizeCycle.indexOf(sizeAt(i))
-      notesModel.setProperty(i, "size", sizeCycle[(cur + 1) % sizeCycle.length])
+      notesModel.setProperty(i, "size", colsOf(sizeAt(i)) === 2 ? "s" : "w")
       rev++
       save()
     }
@@ -164,7 +169,7 @@ BarWidget {
     function addNote(colorKey) {   // newest first
       var id = String(Date.now()) + Math.floor(Math.random() * 1000)
       lastAddedId = id   // set first: the new card checks it as it is created, then takes the cursor
-      notesModel.insert(pinnedCount(), { noteId: id, colorKey: "yellow", text: "", updated: Date.now(), pinned: false, size: "l" })   // new notes start large
+      notesModel.insert(pinnedCount(), { noteId: id, colorKey: "yellow", text: "", updated: Date.now(), pinned: false, size: "w" })   // new notes start wide
       rev++
       save()
       return id
@@ -468,7 +473,10 @@ BarWidget {
             width: flick.width
             readonly property real gap: Style.space(12)
             readonly property real cell: (width - gap * (root.boardCols - 1)) / root.boardCols
-            readonly property real rowH: Math.round(cell * 0.82)
+            // Fine rows, so a card is at most one small step taller than its text.
+            readonly property real rowH: Style.space(8)
+            // Tallest a card gets before it widens instead (an old "tall" note).
+            readonly property real maxCardH: 2 * Math.round(cell * 0.82) + gap
             implicitHeight: root.board.rows > 0 ? root.board.rows * rowH + (root.board.rows - 1) * gap : 0
             height: implicitHeight
 
@@ -526,21 +534,43 @@ BarWidget {
     readonly property bool hot: cardHover.hovered || body.activeFocus
     readonly property int fold: Style.space(18)
 
-    // Text area: fixed to the width this note's columns give it (not the animated
-    // card width), so the measured height settles at once. Card height follows.
-    readonly property int cols: { store.rev; return Math.min(store.spanOf(store.sizeAt(index))[0], root.boardCols) }
-    readonly property real bodyW: cols * grid.cell + (cols - 1) * grid.gap - Style.space(28)
+    // Width: start at the picked width and widen (up to 4 columns) while the
+    // text would make the card taller than maxCardH. Measured with hidden copies
+    // of the text at each width, so it never depends on the card's own size.
+    readonly property int prefCols: { store.rev; return Math.min(store.colsOf(store.sizeAt(index)), root.boardCols) }
+    readonly property int maxCols: Math.max(prefCols, Math.min(4, root.boardCols))
+    function bodyWFor(c) { return c * grid.cell + (c - 1) * grid.gap - Style.space(28) }
+    readonly property var probeH: [probe1.contentHeight, probe2.contentHeight, probe3.contentHeight, probe4.contentHeight]
+    readonly property int cols: {
+      // Narrowest width that fits; else the shortest one (extra width that
+      // doesn't shorten the note, e.g. many short lines, is not taken).
+      var best = prefCols
+      for (var c = prefCols; c <= maxCols; c++) {
+        if (bodyTop + probeH[c - 1] + footH <= grid.maxCardH) return c
+        if (probeH[c - 1] < probeH[best - 1] - 0.5) best = c
+      }
+      return best
+    }
+    // Text area: fixed to the final column width (not the animated card width),
+    // so the measured height settles at once. Card height follows the text.
+    readonly property real bodyW: bodyWFor(cols)
     readonly property real bodyTop: Style.space(34)
     readonly property real footH: Style.space(4) + Math.max(when.height, Style.space(14)) + Style.space(9)
     readonly property real needH: bodyTop + body.contentHeight + footH
     readonly property int fitRows: Math.max(1, Math.ceil((needH + grid.gap) / (grid.rowH + grid.gap) - 0.001))
-    onFitRowsChanged: root.setFit(noteId, fitRows)
+    onColsChanged: root.setFit(noteId, cols, fitRows)
+    onFitRowsChanged: root.setFit(noteId, cols, fitRows)
+
+    Text { id: probe1; visible: false; width: card.bodyWFor(1); text: body.text; font: body.font; wrapMode: Text.Wrap; textFormat: Text.PlainText }
+    Text { id: probe2; visible: false; width: card.bodyWFor(2); text: body.text; font: body.font; wrapMode: Text.Wrap; textFormat: Text.PlainText }
+    Text { id: probe3; visible: false; width: card.bodyWFor(3); text: body.text; font: body.font; wrapMode: Text.Wrap; textFormat: Text.PlainText }
+    Text { id: probe4; visible: false; width: card.bodyWFor(4); text: body.text; font: body.font; wrapMode: Text.Wrap; textFormat: Text.PlainText }
 
     HoverHandler { id: cardHover }
 
     Component.onCompleted: {
       body.text = card.text
-      root.setFit(noteId, fitRows)
+      root.setFit(noteId, cols, fitRows)
       Qt.callLater(function() { card.settled = true })
       if (store.lastAddedId === noteId) {
         store.lastAddedId = ""
@@ -604,7 +634,7 @@ BarWidget {
         onClicked: store.togglePin(card.noteId)
       }
       CardButton {
-        glyph: "\uf065"   // resize: small → wide → tall → large
+        glyph: "\uf065"   // resize: narrow ↔ wide
         ink: card.ink
         onClicked: store.cycleSize(card.noteId)
       }
