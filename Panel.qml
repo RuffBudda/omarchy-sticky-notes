@@ -22,11 +22,22 @@ BarWidget {
   property bool showAll: false          // "View all" expanded panel
   readonly property int compactLimit: 6
   readonly property int boardCols: showAll ? 6 : 4
-  readonly property var board: computeBoard(store.rev, boardCols, showAll)
+  readonly property var board: computeBoard(store.rev, fitRev, boardCols, showAll)
+
+  // Rows each note needs to show all its text, measured by its card (by note id).
+  // Rows only depend on a note's column width, never on the packing: no loop.
+  property var fit: ({})
+  property int fitRev: 0
+  function setFit(id, rows) {
+    if (fit[id] === rows) return
+    fit[id] = rows
+    fitRev++
+  }
 
   // Bento packing: place each note (in order) at the first free spot that
-  // fits its span. Returns a cell rect per note (null = not shown) + row count.
-  function computeBoard(_rev, cols, all) {
+  // fits its span (picked size is the minimum; rows grow to fit the text).
+  // Returns a cell rect per note (null = not shown) + row count.
+  function computeBoard(_rev, _fit, cols, all) {
     var occ = [], rects = [], rows = 0
     function free(r, c, w, h) {
       for (var y = r; y < r + h; y++)
@@ -35,7 +46,7 @@ BarWidget {
     }
     for (var i = 0; i < notesModel.count; i++) {
       if (!all && i >= compactLimit) { rects.push(null); continue }
-      var sp = store.spanOf(store.sizeAt(i)), w = Math.min(sp[0], cols), h = sp[1], done = false
+      var sp = store.spanOf(store.sizeAt(i)), w = Math.min(sp[0], cols), h = Math.max(sp[1], fit[notesModel.get(i).noteId] || 1), done = false
       for (var r = 0; !done; r++) {
         for (var c = 0; c <= cols - w; c++) {
           if (!free(r, c, w, h)) continue
@@ -124,6 +135,7 @@ BarWidget {
     // A note's size: the one picked with the resize button, else from its text.
     function sizeAt(i) {
       var n = notesModel.get(i)
+      if (!n) return "s"   // delegate of a note that was just removed
       if (n.size) return n.size
       var t = n.text || "", lines = t.split("\n").length
       if (t.length > 140 || lines >= 9) return "l"
@@ -444,6 +456,13 @@ BarWidget {
           boundsBehavior: Flickable.StopAtBounds
           interactive: contentHeight > height
 
+          // Keep the caret in view when a tall board scrolls.
+          function reveal(item, r) {
+            var y = item.mapToItem(grid, r.x, r.y).y
+            if (y < contentY) contentY = y
+            else if (y + r.height > contentY + height) contentY = y + r.height - height
+          }
+
           Item {
             id: grid
             width: flick.width
@@ -507,10 +526,21 @@ BarWidget {
     readonly property bool hot: cardHover.hovered || body.activeFocus
     readonly property int fold: Style.space(18)
 
+    // Text area: fixed to the width this note's columns give it (not the animated
+    // card width), so the measured height settles at once. Card height follows.
+    readonly property int cols: { store.rev; return Math.min(store.spanOf(store.sizeAt(index))[0], root.boardCols) }
+    readonly property real bodyW: cols * grid.cell + (cols - 1) * grid.gap - Style.space(28)
+    readonly property real bodyTop: Style.space(34)
+    readonly property real footH: Style.space(4) + Math.max(when.height, Style.space(14)) + Style.space(9)
+    readonly property real needH: bodyTop + body.contentHeight + footH
+    readonly property int fitRows: Math.max(1, Math.ceil((needH + grid.gap) / (grid.rowH + grid.gap) - 0.001))
+    onFitRowsChanged: root.setFit(noteId, fitRows)
+
     HoverHandler { id: cardHover }
 
     Component.onCompleted: {
       body.text = card.text
+      root.setFit(noteId, fitRows)
       Qt.callLater(function() { card.settled = true })
       if (store.lastAddedId === noteId) {
         store.lastAddedId = ""
@@ -590,45 +620,30 @@ BarWidget {
     Timer { id: confirmTimer; interval: 3000; onTriggered: card.confirmDelete = false }
 
 
-    // Text
-    Flickable {
-      id: bodyFlick
-      anchors {
-        top: parent.top; left: parent.left; right: parent.right; bottom: when.top
-        topMargin: Style.space(34); leftMargin: Style.space(14); rightMargin: Style.space(14); bottomMargin: Style.space(4)
-      }
-      contentWidth: width
-      contentHeight: body.contentHeight
-      clip: true
-      boundsBehavior: Flickable.StopAtBounds
+    // Text (the card grows to fit it, so there is no inner scrolling)
+    TextEdit {
+      id: body
+      x: Style.space(14)
+      y: card.bodyTop
+      width: card.bodyW
+      height: Math.max(contentHeight, card.height - card.bodyTop - card.footH)
+      wrapMode: TextEdit.Wrap
+      textFormat: TextEdit.PlainText
+      selectByMouse: true
+      color: card.ink
+      selectionColor: card.dark ? "#777777" : Qt.darker(card.paper, 1.3)
+      selectedTextColor: card.ink
+      font.family: root.noteFont
+      font.pixelSize: Style.space(14)
+      onTextChanged: if (text !== card.text) store.update(card.noteId, { text: text })
+      onCursorRectangleChanged: if (activeFocus) flick.reveal(body, cursorRectangle)
+      Keys.onEscapePressed: root.close()
 
-      function ensureVisible(r) {
-        if (contentY >= r.y) contentY = r.y
-        else if (contentY + height <= r.y + r.height) contentY = r.y + r.height - height
-      }
-
-      TextEdit {
-        id: body
-        width: bodyFlick.width
-        height: Math.max(bodyFlick.height, contentHeight)
-        wrapMode: TextEdit.Wrap
-        textFormat: TextEdit.PlainText
-        selectByMouse: true
-        color: card.ink
-        selectionColor: card.dark ? "#777777" : Qt.darker(card.paper, 1.3)
-        selectedTextColor: card.ink
-        font.family: root.noteFont
-        font.pixelSize: Style.space(14)
-        onTextChanged: if (text !== card.text) store.update(card.noteId, { text: text })
-        onCursorRectangleChanged: bodyFlick.ensureVisible(cursorRectangle)
-        Keys.onEscapePressed: root.close()
-
-        Text {
-          visible: body.text === "" && !body.activeFocus
-          text: "Write something…"
-          color: card.inkSoft
-          font: body.font
-        }
+      Text {
+        visible: body.text === "" && !body.activeFocus
+        text: "Write something…"
+        color: card.inkSoft
+        font: body.font
       }
     }
 
