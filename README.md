@@ -38,7 +38,9 @@ in the panel, never on the desktop.
 
 **External dependencies: none.** The plugin is a single QML file that uses only
 what the Omarchy shell already provides. It runs no network requests and no
-privileged commands; the only process it starts is `mkdir -p` for its notes folder.
+privileged commands. The only process it starts is a short `sh` command on first
+start that creates its notes folder (`0700`) and `notes.json` (`0600`), and tightens
+them if an older version left them readable to others.
 It never edits your Omarchy, Hyprland or bar configuration.
 
 ## Install
