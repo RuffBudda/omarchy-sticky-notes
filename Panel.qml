@@ -33,8 +33,11 @@ BarWidget {
     var f = fit[id]
     if (f && f.w === w && f.h === h) return
     fit[id] = { w: w, h: h }
-    fitRev++
+    // One re-pack per event-loop pass, not one per card: when every card
+    // re-measures at once (View all, a reload) that would be N full re-packs.
+    Qt.callLater(bumpFit)
   }
+  function bumpFit() { fitRev++ }
 
   // Bento packing: place each note (in order) at the first free spot that
   // fits its measured span. Returns a cell rect per note (null = not shown)
@@ -220,22 +223,32 @@ BarWidget {
     }
     function load(raw) {
       if (raw === lastWritten) { loaded = true; return }   // our own write coming back
-      lastWritten = raw
-      notesModel.clear()
+      // Check the whole file before touching the notes. A file caught half
+      // written (another program saving it in place) or broken must not clear
+      // them, or the next save would write that loss to disk. Keep the notes,
+      // and don't start saving over a file we could not read.
+      var data, list
       try {
-        var data = JSON.parse(raw)
-        if (data.lastColor) lastColor = String(data.lastColor)
-        var list = data.notes || []
-        for (var i = 0; i < list.length; i++)
-          notesModel.append({
-            noteId: String(list[i].id), colorKey: String(list[i].color || "yellow"),
-            text: String(list[i].text || ""), updated: Number(list[i].updated) || 0,
-            pinned: list[i].pinned === true,
-            size: ["s", "w", "t", "l"].indexOf(list[i].size) >= 0 ? list[i].size : ""
-          })
+        data = JSON.parse(raw)
+        if (!data || typeof data !== "object" || Array.isArray(data)) throw "not a notes file"
+        list = data.notes === undefined ? [] : data.notes
+        if (!Array.isArray(list)) throw "notes is not a list"
+        for (var j = 0; j < list.length; j++)
+          if (!list[j] || typeof list[j] !== "object") throw "note " + j + " is not an object"
       } catch (e) {
-        console.warn("sticky-notes: could not read notes.json: " + e)
+        console.warn("sticky-notes: could not read notes.json, keeping the notes in memory: " + e)
+        return
       }
+      lastWritten = raw
+      if (data.lastColor) lastColor = String(data.lastColor)
+      notesModel.clear()
+      for (var i = 0; i < list.length; i++)
+        notesModel.append({
+          noteId: String(list[i].id), colorKey: String(list[i].color || "yellow"),
+          text: String(list[i].text || ""), updated: Number(list[i].updated) || 0,
+          pinned: list[i].pinned === true,
+          size: ["s", "w", "t", "l"].indexOf(list[i].size) >= 0 ? list[i].size : ""
+        })
       loaded = true
       rev++
     }
