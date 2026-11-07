@@ -130,6 +130,11 @@ BarWidget {
     readonly property var notes: notesModel
     readonly property string dataDir: Quickshell.env("HOME") + "/.local/share/omarchy-sticky-notes"
     property bool loaded: false
+    // Set once the setup check below has made the notes folder and file safe to use.
+    // Until then nothing is read or written. If the check fails, storageError says why
+    // and the panel shows it instead of notes.
+    property bool storageReady: false
+    property string storageError: ""
     property string lastAddedId: ""
     property string lastColor: "yellow"
     property string lastWritten: ""
@@ -170,6 +175,7 @@ BarWidget {
       return -1
     }
     function addNote(colorKey) {   // newest first
+      if (storageError !== "") return ""   // could never be saved
       var id = String(Date.now()) + Math.floor(Math.random() * 1000)
       lastAddedId = id   // set first: the new card checks it as it is created, then takes the cursor
       notesModel.insert(pinnedCount(), { noteId: id, colorKey: "yellow", text: "", updated: Date.now(), pinned: false, size: "w" })   // new notes start wide
@@ -262,26 +268,51 @@ BarWidget {
   // The file is seeded empty with 0600 so the first save keeps that mode (atomic
   // writes keep the mode of the file they replace). The path goes in as $1, never
   // spliced into the script.
+  //
+  // Before anything is tightened or read, the folder and notes.json must belong to
+  // you, and notes.json must be a regular file, not a symlink. An older install
+  // could leave the folder writable by other accounts, and another account could
+  // have put a notes.json symlink there that points at a file it owns. chmod can't
+  // tighten that file, so the plugin would keep its notes in someone else's
+  // readable file. Any failed check stops the plugin from using the folder at all.
+  // The folder is made 0700 before notes.json is checked, so no other account can
+  // swap the file once it has been checked.
+  // Exit codes: 1 could not create or fix, 2 folder not yours, 3 notes.json not a
+  // regular file or a symlink, 4 notes.json not yours.
   Process {
     running: true
     command: ["sh", "-c",
       'umask 077; d="$1"; f="$d/notes.json"; ' +
-      'mkdir -p -- "$d" && chmod 700 -- "$d" || exit 1; ' +
-      'if [ -e "$f" ]; then chmod 600 -- "$f"; ' +
-      'else printf \'{ "version": 2, "notes": [] }\\n\' > "$f"; fi',
+      'mkdir -p -- "$d" || exit 1; ' +
+      '[ -d "$d" ] && [ -O "$d" ] || exit 2; ' +
+      'chmod 700 -- "$d" || exit 1; ' +
+      'if [ -L "$f" ]; then exit 3; fi; ' +
+      'if [ -e "$f" ]; then ' +
+        '[ -f "$f" ] || exit 3; [ -O "$f" ] || exit 4; chmod 600 -- "$f" || exit 1; ' +
+      'else printf \'{ "version": 2, "notes": [] }\\n\' > "$f" || exit 1; fi',
       "sh", store.dataDir]
-    onExited: dataFile.reload()
+    onExited: function(exitCode) {
+      if (exitCode === 0) { store.storageReady = true; return }
+      var why = {
+        2: "the folder is not owned by your account",
+        3: "notes.json is a symlink or not a regular file",
+        4: "notes.json is not owned by your account"
+      }[exitCode] || "it could not be made private (owner-only)"
+      store.storageError = "Notes not loaded: " + why + "."
+      console.warn("sticky-notes: not using " + store.dataDir + ": " + why +
+        ". Fix or remove it, then reload the shell.")
+    }
   }
 
   FileView {
     id: dataFile
-    path: store.dataDir + "/notes.json"
+    path: store.storageReady ? store.dataDir + "/notes.json" : ""
     watchChanges: true
     atomicWrites: true
     printErrors: false
     onFileChanged: reload()
     onLoaded: if (!saveTimer.running) store.load(text())
-    onLoadFailed: store.loaded = true
+    onLoadFailed: if (store.storageReady) store.loaded = true
   }
 
   // ── Bar button ─────────────────────────────────────────────────────
@@ -450,14 +481,19 @@ BarWidget {
           }
           Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: "No notes yet"
+            text: store.storageError !== "" ? "Notes are turned off" : "No notes yet"
             color: root.fg
             font.family: root.uiFont
             font.pixelSize: Style.space(13)
           }
           Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: "Click + to start one"
+            width: Math.min(implicitWidth, notesArea.width - Style.space(32))
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
+            text: store.storageError !== ""
+              ? store.storageError + "\nCheck ~/.local/share/omarchy-sticky-notes, then reload the shell."
+              : "Click + to start one"
             color: root.subtle
             font.family: root.uiFont
             font.pixelSize: Style.space(11)

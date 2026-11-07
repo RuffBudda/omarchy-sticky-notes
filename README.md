@@ -33,7 +33,9 @@ in the panel, never on the desktop.
 - **Saved automatically** to `~/.local/share/omarchy-sticky-notes/notes.json`, and kept
   in sync across monitors. Only your account can read them: the folder is `0700` and
   the file `0600`, whatever your umask (files left readable by older versions are
-  tightened when the plugin loads).
+  tightened when the plugin loads). If the folder or `notes.json` belongs to another
+  account, or `notes.json` is a symlink, the plugin doesn't read or write notes there
+  and says so in the panel.
 - Panel colors follow your Omarchy theme.
 
 ## Requirements
@@ -46,7 +48,9 @@ what the Omarchy shell already provides. It runs no network requests and no
 privileged commands. The only process it starts is a short `sh` command, run each
 time the widget loads (once per bar), that sets its notes folder to `0700` and
 `notes.json` to `0600`. If they are missing it creates them, with an empty note list
-(and any missing parent folders, also owner-only). It never changes your notes.
+(and any missing parent folders, also owner-only). It first checks that the folder and `notes.json` are yours and that
+`notes.json` is a real file, not a symlink. If not, it leaves them alone and the
+panel shows why. It never changes your notes.
 It never edits your Omarchy, Hyprland or bar configuration.
 
 ## Install

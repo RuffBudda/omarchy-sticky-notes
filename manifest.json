@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.ruffbudda.sticky-notes",
   "name": "Sticky Notes",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "author": "RuffBudda",
   "license": "MIT",
   "description": "Yellow sticky notes in a bento-style bar panel: pin, resize and delete notes; Ctrl+N new note, Esc closes. Saved to ~/.local/share/omarchy-sticky-notes/notes.json.",
